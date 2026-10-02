@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>SoloWrite</title>
+    <style>
+        body { font-family: Arial, sans-serif; background: #f0f2f5; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
+        .chat-container { width: 450px; height: 650px; background: white; border-radius: 12px; box-shadow: 0 5px 15px rgba(0,0,0,0.1); display: flex; flex-direction: column; overflow: hidden; }
+        .chat-header { background: #007bff; color: white; padding: 15px; display: flex; justify-content: space-between; align-items: center; font-weight: bold; font-size: 1.1em; box-sizing: border-box; }
+        .header-title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-right: 10px; }
+        .header-buttons { display: flex; gap: 5px; flex-shrink: 0; }
+        .header-btn { background: rgba(255,255,255,0.2); border: none; color: white; padding: 5px 8px; border-radius: 5px; cursor: pointer; font-size: 0.7em; font-weight: normal; transition: background 0.2s; }
+        .header-btn:hover { background: rgba(255,255,255,0.4); }
+        .chat-messages { flex: 1; padding: 15px; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; background: #fafafa; }
+        .message { padding: 10px 14px; border-radius: 18px; max-width: 80%; word-wrap: break-word; font-size: 0.95em; }
+        .user { background: #007bff; color: white; align-self: flex-end; border-bottom-right-radius: 2px; }
+        .bot { background: #e4e6eb; color: black; align-self: flex-start; border-bottom-left-radius: 2px; }
+        .bot img { width: 100%; border-radius: 10px; margin-top: 8px; display: block; background: #ccc; min-height: 150px; }
+        .chat-input-area { display: flex; padding: 10px; border-top: 1px solid #e4e6eb; background: #fff; }
+        .chat-input { flex: 1; padding: 10px; border: 1px solid #ccd0d5; border-radius: 20px; outline: none; padding-left: 15px; }
+        .chat-submit { background: #007bff; color: white; border: none; padding: 0 15px; margin-left: 8px; border-radius: 20px; cursor: pointer; font-weight: bold; }
+        .chat-submit:hover { background: #0056b3; }
+        .stats { font-size: 0.75em; color: #65676b; text-align: center; padding: 5px; background: #f8f9fa; border-top: 1px solid #e4e6eb; }
+        #fileInput { display: none; }
+    </style>
+</head>
+<body>
+
+<div class="chat-container">
+    <div class="chat-header">
+        <div class="header-title">SoloWrite 🎨</div>
+        <div class="header-buttons">
+            <button class="header-btn" id="downloadBrain" title="Скачать базу знаний в JSON">📥 Скачать</button>
+            <button class="header-btn" id="uploadTrigger" title="Загрузить базу знаний из JSON">📤 Загрузить</button>
+            <button class="header-btn" id="clearMemory" title="Стереть всю память">🗑️ Сброс</button>
+        </div>
+    </div>
+    <div class="chat-messages" id="messages"></div>
+    <div class="stats" id="stats">Изучено слов: 0 | Связей: 0 | Образов: 0</div>
+    <div class="chat-input-area">
+        <input type="text" id="input" class="chat-input" placeholder="Введите фразу или попроси нарисовать..." autocomplete="off">
+        <button id="send" class="chat-submit">Отправить</button>
+    </div>
+</div>
+
+<input type="file" id="fileInput" accept=".json">
+
+<script>
+    let brain = {
+        t: {},
+        s: [],
+        img: {} 
+    };
+
+    const imgTriggers = ['нарисуй', 'сгенерируй', 'картинка', 'картинку', 'фото', 'покажи', 'изобрази'];
+
+    function loadBrain() {
+        const savedBrain = localStorage.getItem('ai_brain_memory');
+        if (savedBrain) {
+            try {
+                const parsed = JSON.parse(savedBrain);
+                brain.t = parsed.t || parsed.transitions || {};
+                brain.s = parsed.s || parsed.starts || [];
+                brain.img = parsed.img || {};
+                updateStats();
+            } catch (e) {
+                console.error(e);
+            }
+        }
+    }
+
+    function saveBrain() {
+        localStorage.setItem('ai_brain_memory', JSON.stringify({ t: brain.t, s: brain.s, img: brain.img }));
+    }
+
+    document.getElementById('downloadBrain').addEventListener('click', () => {
+        const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(brain, null, 2));
+        const a = document.createElement('a'); a.href = dataStr; a.download = "brain.json"; a.click();
+    });
+
+    document.getElementById('uploadTrigger').addEventListener('click', () => document.getElementById('fileInput').click());
+
+    document.getElementById('fileInput').addEventListener('change', (event) => {
+        const file = event.target.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            try {
+                const parsed = JSON.parse(e.target.result);
+                brain.t = parsed.t || parsed.transitions || {};
+                brain.s = parsed.s || parsed.starts || [];
+                brain.img = parsed.img || {};
+                saveBrain(); updateStats(); location.reload();
+            } catch (err) { alert('Ошибка: Файл поврежден или это не JSON.'); }
+        };
+        reader.readAsText(file);
+    });
+
+    document.getElementById('clearMemory').addEventListener('click', () => {
+        if (confirm('Стереть память ИИ?')) {
+            localStorage.removeItem('ai_brain_memory');
+            brain = { t: {}, s: [], img: {} };
+            updateStats(); location.reload();
+        }
+    });
+
+    function tokenize(text) {
+        return text.toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, '').split(/\s+/).filter(w => w.length > 0);
+    }
+
+    function train(text) {
+        const words = tokenize(text);
+        if (words.length === 0) return;
+
+        const startWord = words[0];
+        if (!brain.s.includes(startWord)) brain.s.push(startWord);
+
+        for (let i = 0; i < words.length - 1; i++) {
+            const current = words[i], next = words[i + 1];
+            if (!brain.t[current]) brain.t[current] = {};
+            if (!brain.t[current][next]) brain.t[current][next] = 0;
+            brain.t[current][next]++;
+        }
+
+        const wantsImage = words.some(w => imgTriggers.includes(w));
+        if (wantsImage) {
+            words.forEach(w => {
+                if (!imgTriggers.includes(w)) {
+                    if (!brain.img[w]) brain.img[w] = 0;
+                    brain.img[w] += 1; 
+                }
+            });
+        }
+
+        updateStats();
+        saveBrain();
+    }
+
+    function generateResponse(userText) {
+        const userWords = tokenize(userText);
+        
+        let shouldDraw = false;
+        let imgPrompt = "";
+
+        if (userWords.some(w => imgTriggers.includes(w))) {
+            shouldDraw = true;
+        } else {
+            let imgScore = 0;
+            userWords.forEach(w => {
+                if (brain.img[w]) imgScore += brain.img[w];
+            });
+            if (imgScore > 2) shouldDraw = true;
+        }
+
+        if (shouldDraw) {
+            const promptWords = userWords.filter(w => !imgTriggers.includes(w));
+            imgPrompt = promptWords.join(' ');
+            if (!imgPrompt) imgPrompt = "что-то красивое и абстрактное";
+        }
+
+        const contextWords = userWords.filter(word => brain.t[word] || brain.s.includes(word));
+        let currentWord = contextWords.length > 0 
+            ? contextWords[Math.floor(Math.random() * contextWords.length)] 
+            : (brain.s.length > 0 ? brain.s[Math.floor(Math.random() * brain.s.length)] : null);
+
+        let finalSentence = "...";
+        if (currentWord) {
+            let result = [currentWord];
+            for (let i = 0; i < 15; i++) {
+                const nextOptions = brain.t[currentWord];
+                if (!nextOptions || Object.keys(nextOptions).length === 0) break;
+                const nextWord = getRandomNextWord(nextOptions, result);
+                if (!nextWord) break;
+                currentWord = nextWord;
+                result.push(currentWord);
+            }
+            finalSentence = result.join(' ');
+            finalSentence = finalSentence.charAt(0).toUpperCase() + finalSentence.slice(1) + (shouldDraw ? ':' : '.');
+        } else if (shouldDraw) {
+            finalSentence = "Вот что я нарисовал:";
+        }
+
+        return { text: finalSentence, imagePrompt: shouldDraw ? imgPrompt : null };
+    }
+
+    function getRandomNextWord(options, usedWords) {
+        const availableWords = Object.keys(options).filter(word => !usedWords.includes(word));
+        if (availableWords.length === 0) return null;
+        const totalWeight = availableWords.reduce((sum, word) => sum + options[word], 0);
+        let random = Math.random() * totalWeight;
+        for (const word of availableWords) {
+            random -= options[word];
+            if (random <= 0) return word;
+        }
+        return availableWords[availableWords.length - 1];
+    }
+
+    function updateStats() {
+        const wordsCount = Object.keys(brain.t).length;
+        let linksCount = 0;
+        for (const word in brain.t) linksCount += Object.keys(brain.t[word]).length;
+        const imgWordsCount = Object.keys(brain.img).length;
+        document.getElementById('stats').innerText = `Слов: ${wordsCount} | Связей: ${linksCount} | Визуальных образов: ${imgWordsCount}`;
+    }
+
+    const messagesContainer = document.getElementById('messages');
+    const inputField = document.getElementById('input');
+
+    function addMessage(htmlContent, sender) {
+        const msgDiv = document.createElement('div');
+        msgDiv.classList.add('message', sender);
+        msgDiv.innerHTML = htmlContent;
+        messagesContainer.appendChild(msgDiv);
+        scrollToBottom();
+        
+        const img = msgDiv.querySelector('img');
+        if(img) img.onload = scrollToBottom;
+    }
+
+    function scrollToBottom() {
+        messagesContainer.scrollTop = messagesContainer.scrollHeight;
+    }
+
+    async function translateRuToEn(text) {
+        try {
+            const response = await fetch(`https://translate.googleapis.com/translate_a/single?client=gtx&sl=ru&tl=en&dt=t&q=${encodeURIComponent(text)}`);
+            const data = await response.json();
+            return data[0][0][0];
+        } catch (e) {
+            return text;
+        }
+    }
+
+    async function handleSend() {
+        const text = inputField.value.trim();
+        if (!text) return;
+
+        const safeText = text.replace(/</g, "&lt;").replace(/>/g, "&gt;");
+        addMessage(safeText, 'user');
+        inputField.value = '';
+
+        const response = generateResponse(text);
+        
+        setTimeout(async () => {
+            let botHTML = response.text;
+            
+            if (response.imagePrompt) {
+                const translatedPrompt = await translateRuToEn(response.imagePrompt);
+                const encodedPrompt = encodeURIComponent(translatedPrompt + ", high quality, detailed, beautiful, masterpiece");
+                const imageUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=400&height=400&nologo=true`;
+                botHTML += `<br><img src="${imageUrl}" alt="AI Image">`;
+            }
+
+            addMessage(botHTML, 'bot');
+            train(text);
+        }, 600);
+    }
+
+    document.getElementById('send').addEventListener('click', handleSend);
+    inputField.addEventListener('keypress', (e) => { if (e.key === 'Enter') handleSend(); });
+
+    loadBrain();
+</script>
+
+</body>
+</html>
