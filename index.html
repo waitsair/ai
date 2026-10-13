@@ -169,7 +169,7 @@
         let linksCount = 0;
         for (const word in brain.t) linksCount += Object.keys(brain.t[word]).length;
         const imgWordsCount = Object.keys(brain.img).length;
-        document.getElementById('stats').innerText = `Слов: ${wordsCount} | Связей: ${linksCount} | Визуальных образов: ${imgWordsCount}`;
+        document.getElementById('stats').innerText = `Слов: ${wordsCount} | Связей: ${linksCount}`;
     }
 
     const messagesContainer = document.getElementById('messages');
