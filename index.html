@@ -37,9 +37,9 @@
         </div>
     </div>
     <div class="chat-messages" id="messages"></div>
-    <div class="stats" id="stats">Изучено слов: 0 | Связей: 0 | Образов: 0</div>
+    <div class="stats" id="stats">Изучено слов: 0 | Связей: 0 </div>
     <div class="chat-input-area">
-        <input type="text" id="input" class="chat-input" placeholder="Введите фразу или попроси нарисовать..." autocomplete="off">
+        <input type="text" id="input" class="chat-input" placeholder="Введите фразу..." autocomplete="off">
         <button id="send" class="chat-submit">Отправить</button>
     </div>
 </div>
@@ -52,8 +52,6 @@
         s: [],
         img: {} 
     };
-
-    const imgTriggers = ['нарисуй', 'сгенерируй', 'картинка', 'картинку', 'фото', 'покажи', 'изобрази'];
 
     function loadBrain() {
         const savedBrain = localStorage.getItem('ai_brain_memory');
@@ -123,15 +121,6 @@
             brain.t[current][next]++;
         }
 
-        const wantsImage = words.some(w => imgTriggers.includes(w));
-        if (wantsImage) {
-            words.forEach(w => {
-                if (!imgTriggers.includes(w)) {
-                    if (!brain.img[w]) brain.img[w] = 0;
-                    brain.img[w] += 1; 
-                }
-            });
-        }
 
         updateStats();
         saveBrain();
@@ -139,25 +128,6 @@
 
     function generateResponse(userText) {
         const userWords = tokenize(userText);
-        
-        let shouldDraw = false;
-        let imgPrompt = "";
-
-        if (userWords.some(w => imgTriggers.includes(w))) {
-            shouldDraw = true;
-        } else {
-            let imgScore = 0;
-            userWords.forEach(w => {
-                if (brain.img[w]) imgScore += brain.img[w];
-            });
-            if (imgScore > 2) shouldDraw = true;
-        }
-
-        if (shouldDraw) {
-            const promptWords = userWords.filter(w => !imgTriggers.includes(w));
-            imgPrompt = promptWords.join(' ');
-            if (!imgPrompt) imgPrompt = "что-то красивое и абстрактное";
-        }
 
         const contextWords = userWords.filter(word => brain.t[word] || brain.s.includes(word));
         let currentWord = contextWords.length > 0 
@@ -176,12 +146,10 @@
                 result.push(currentWord);
             }
             finalSentence = result.join(' ');
-            finalSentence = finalSentence.charAt(0).toUpperCase() + finalSentence.slice(1) + (shouldDraw ? ':' : '.');
-        } else if (shouldDraw) {
-            finalSentence = "Вот что я нарисовал:";
+            finalSentence = finalSentence.charAt(0).toUpperCase() + finalSentence.slice(1) + '.';
         }
 
-        return { text: finalSentence, imagePrompt: shouldDraw ? imgPrompt : null };
+        return { text: finalSentence };
     }
 
     function getRandomNextWord(options, usedWords) {
@@ -213,23 +181,10 @@
         msgDiv.innerHTML = htmlContent;
         messagesContainer.appendChild(msgDiv);
         scrollToBottom();
-        
-        const img = msgDiv.querySelector('img');
-        if(img) img.onload = scrollToBottom;
     }
 
     function scrollToBottom() {
         messagesContainer.scrollTop = messagesContainer.scrollHeight;
-    }
-
-    async function translateRuToEn(text) {
-        try {
-            const response = await fetch(`https://translate.googleapis.com/translate_a/single?client=gtx&sl=ru&tl=en&dt=t&q=${encodeURIComponent(text)}`);
-            const data = await response.json();
-            return data[0][0][0];
-        } catch (e) {
-            return text;
-        }
     }
 
     async function handleSend() {
@@ -242,17 +197,8 @@
 
         const response = generateResponse(text);
         
-        setTimeout(async () => {
-            let botHTML = response.text;
-            
-            if (response.imagePrompt) {
-                const translatedPrompt = await translateRuToEn(response.imagePrompt);
-                const encodedPrompt = encodeURIComponent(translatedPrompt + ", high quality, detailed, beautiful, masterpiece");
-                const imageUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=400&height=400&nologo=true`;
-                botHTML += `<br><img src="${imageUrl}" alt="AI Image">`;
-            }
-
-            addMessage(botHTML, 'bot');
+        setTimeout(() => {
+            addMessage(response.text, 'bot');
             train(text);
         }, 600);
     }
